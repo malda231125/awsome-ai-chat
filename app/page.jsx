@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { isNearBottom } from '../lib/scroll.mjs';
 
 const MODELS = [
   { value: 'auto', label: '🧠 자동 (AI 라우팅)' },
@@ -32,14 +33,55 @@ export default function Page() {
   const [model, setModel] = useState('auto');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const messagesViewportRef = useRef(null);
+  const stickToBottomRef = useRef(true);
+  const lastTouchYRef = useRef(null);
   const bottomRef = useRef(null);
 
   useEffect(() => {
     fetch('/api/me').then((r) => r.json()).then((d) => setAuthed(d.authed)).catch(() => setAuthed(false));
   }, []);
 
+  function scrollToLatest(behavior = 'auto') {
+    bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+    stickToBottomRef.current = true;
+    setShowJumpToLatest(false);
+  }
+
+  function pauseAutoScroll() {
+    stickToBottomRef.current = false;
+    setShowJumpToLatest(true);
+  }
+
+  function handleMessagesScroll() {
+    const nearBottom = isNearBottom(messagesViewportRef.current);
+    stickToBottomRef.current = nearBottom;
+    setShowJumpToLatest(!nearBottom);
+  }
+
+  function handleMessagesWheel(e) {
+    if (e.deltaY < 0) pauseAutoScroll();
+  }
+
+  function handleMessagesTouchStart(e) {
+    lastTouchYRef.current = e.touches?.[0]?.clientY ?? null;
+  }
+
+  function handleMessagesTouchMove(e) {
+    const nextY = e.touches?.[0]?.clientY ?? null;
+    if (nextY !== null && lastTouchYRef.current !== null && nextY > lastTouchYRef.current + 4) {
+      pauseAutoScroll();
+    }
+    lastTouchYRef.current = nextY;
+  }
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (stickToBottomRef.current) {
+      scrollToLatest('auto');
+    } else {
+      setShowJumpToLatest(true);
+    }
   }, [messages, busy]);
 
   async function login(e) {
@@ -59,6 +101,8 @@ export default function Page() {
     const text = input.trim();
     if (!text || busy) return;
     const history = [...messages, { role: 'user', content: text }];
+    stickToBottomRef.current = true;
+    setShowJumpToLatest(false);
     setMessages(history);
     setInput('');
     setBusy(true);
@@ -135,7 +179,7 @@ export default function Page() {
   }
 
   return (
-    <main style={{ ...box, display: 'flex', flexDirection: 'column', height: '100dvh' }}>
+    <main style={{ ...box, position: 'relative', display: 'flex', flexDirection: 'column', height: '100dvh' }}>
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid #232838' }}>
         <div>
           <strong style={{ fontSize: 17 }}>Awsome AI</strong>
@@ -147,7 +191,14 @@ export default function Page() {
         </select>
       </header>
 
-      <section style={{ flex: 1, overflowY: 'auto', padding: '18px 0' }}>
+      <section
+        ref={messagesViewportRef}
+        onScroll={handleMessagesScroll}
+        onWheel={handleMessagesWheel}
+        onTouchStart={handleMessagesTouchStart}
+        onTouchMove={handleMessagesTouchMove}
+        style={{ flex: 1, overflowY: 'auto', padding: '18px 0' }}
+      >
         {messages.length === 0 && (
           <p style={{ color: '#8b93a7', textAlign: 'center', marginTop: 80 }}>
             무엇이든 물어보세요. 🧠 자동 모드면 프롬프트에 맞는 무료 모델을 AI가 골라줍니다.
@@ -174,6 +225,30 @@ export default function Page() {
         {busy && <p style={{ color: '#8b93a7', fontSize: 13 }}>{status}</p>}
         <div ref={bottomRef} />
       </section>
+
+      {showJumpToLatest && (
+        <button
+          type="button"
+          onClick={() => scrollToLatest('smooth')}
+          style={{
+            position: 'absolute',
+            right: 22,
+            bottom: 82,
+            zIndex: 10,
+            border: '1px solid #33405a',
+            background: '#1f2534',
+            color: '#dbe4ff',
+            borderRadius: 999,
+            padding: '8px 12px',
+            fontSize: 13,
+            fontWeight: 700,
+            boxShadow: '0 8px 22px rgba(0,0,0,0.28)',
+            cursor: 'pointer',
+          }}
+        >
+          ↓ 최신 응답
+        </button>
+      )}
 
       <form onSubmit={send} style={{ display: 'flex', gap: 8, padding: '12px 0 18px' }}>
         <input
